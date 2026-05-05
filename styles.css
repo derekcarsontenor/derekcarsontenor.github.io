@@ -1,0 +1,237 @@
+.center-column {
+    font-family: sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 2rem auto;
+    padding: 2rem;
+    width: 80%;
+    max-width: 900px;
+    border-radius: 20px;
+    background-color: rgba(0,0,0,0);
+    min-height: 100vh;
+}
+
+body {
+    background-color: rgb(237, 182, 206);
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0;
+}
+
+.site-header ul {
+    margin: 0;
+    padding: 0;
+}
+
+header {
+    width: 100%;
+    text-align: center;
+    margin: 0;
+    font-family: sans-serif;
+}
+
+
+main {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.header-image {
+    max-width: 100%;
+    height: auto;
+    margin-bottom: 2rem;
+}
+
+
+.site-header {
+    width: 100%;
+    background: rgb(56, 118, 29);
+    padding: 1rem 0;
+    text-align: center;
+    position: relative;
+    z-index: 1000;
+}
+
+.nav-links {
+    list-style: none;
+    display: flex;
+    justify-content: center;
+    gap: 3rem;
+    margin: 0;
+    padding: 0;
+    font-size: 1.5rem;
+}
+
+.nav-links a, .nav-links p {
+    text-decoration: none;
+    color: #fff;
+    font-weight: 600;
+}
+
+/* Highlight active page */
+.nav-links .active > a {
+    color: #a3efb3;
+    border-bottom: 3px solid #a3efb3;
+    padding-bottom: 0.2rem;
+}
+
+.dropdown {
+    position: relative;
+}
+
+.dropbtn {
+    margin: 0;
+    padding: 0;
+    display: inline;
+    font-weight: 600;
+    cursor: default;
+}
+
+/* hide menu by default */
+.dropdown-content {
+    display: none;
+    position: absolute;
+    top: 2.5rem;
+    left: 0;
+    background-color: #fff;
+    min-width: 200px;
+    border-radius: 8px;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+    list-style: none;
+    padding: 0.5rem 0;
+    text-align: left;
+}
+
+/* Items inside dropdown */
+.dropdown-content li {
+    padding: 0;
+}
+
+.dropdown-content a {
+    display: block;
+    padding: 0.6rem 1rem;
+    color: #ffffff;
+    font-weight: 500;
+}
+
+.dropdown-content a:hover {
+    background-color: rgba(211, 232, 13, 0.2);
+}
+
+.dropdown:hover .dropdown-content,
+.dropdown:focus-within .dropdown-content {
+    display: block;
+}
+
+
+.dropdown-content {
+    top: 100%;
+}
+
+.image-gallery {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2rem;
+    width: 100%;
+}
+
+.image-gallery figure {
+    width: 39%;
+}
+
+.image-gallery img {
+    width: 100%;
+    border-radius: 15px;
+    border: 5px solid rgba(51, 35, 16, 0.8);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+.gallery-header {
+    width: 100%;
+    margin-top: 2rem;
+    margin-bottom: 0.5rem;
+    font-size: 1.5rem;
+}
+
+
+.listen-gallery {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2rem;
+    width: 100%;
+}
+
+.listen-gallery iframe {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+
+form {
+    width: 100%;
+    max-width: 600px; /* keeps it from getting too wide */
+    margin: 0 auto;   /* centers the form */
+}
+
+/* Inputs and textarea */
+form input,
+form textarea {
+    width: 100%;
+    padding: 0.75rem;
+    margin-top: 0.3rem;
+    margin-bottom: 1.2rem;
+    border-radius: 8px;
+    border: 2px solid rgba(51, 35, 16, 0.4);
+    font-size: 1rem;
+    box-sizing: border-box; /* prevents overflow */
+}
+
+/* Focus state (nice UX touch) */
+form input:focus,
+form textarea:focus {
+    outline: none;
+    border-color: rgba(51, 35, 16, 0.8);
+}
+
+/* Button styling */
+form button {
+    padding: 0.75rem 1.5rem;
+    border-radius: 10px;
+    border: none;
+    background-color: rgb(56, 118, 29);
+    color: white;
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+form button:hover {
+    background-color: #a3efb3;
+    color: black
+}
+
+.about-content {
+    line-height: 1.6;
+}
+
+.about-image {
+    float: left;
+    width: 250px;
+    margin: 0 1.5rem 1rem 0;
+    border-radius: 15px;
+    border: 5px solid rgba(51, 35, 16, 0.8);
+}
+
+.about-content::after {
+    content: "";
+    display: block;
+    clear: both;
+}

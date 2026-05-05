@@ -1,0 +1,24 @@
+<nav class="site-header">
+    <ul class="nav-links">
+        <li class="{% if page.url == '/' %}active{% endif %}">
+            <a href="{{ '/' | relative_url }}">Home</a>
+        </li>
+
+        <li class="{% if page.url == '/about/' || page.url == '/about' %}active{% endif %}">
+            <a href="{{ '/about/' | relative_url }}">About</a>
+        </li>
+
+        <li class="{% if page.url == '/gallery/' || page.url == '/gallery' %}active{% endif %}">
+            <a href="{{ '/gallery/' | relative_url }}">Gallery</a>
+        </li>
+
+        <li class="{% if page.url == '/listen/' || page.url == '/listen'  %}active{% endif %}">
+            <a href="{{ '/listen/' | relative_url }}">Listen</a>
+        </li>
+        <li class="{% if page.url == '/contact/' || page.url == '/contact'  %}active{% endif %}">
+            <a href="{{ '/contact/' | relative_url }}">Contact</a>
+        </li>
+    </ul>
+</nav>
+
+

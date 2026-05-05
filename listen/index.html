@@ -1,0 +1,40 @@
+---
+layout: default
+title: Gallery
+---
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Derek Carsons - {{ page.title }}</title>
+    <link rel="stylesheet" href="{{ '/styles.css' | relative_url }}">
+</head>
+
+<body>
+<header>
+    {% include header.html %}
+</header>
+
+<main>
+    <div class="center-column">
+        <h1>{{ page.title }}</h1>
+
+        <div class="listen-gallery">
+            {% for item in site.data.videos %}
+
+            <iframe
+                    src="{{item}}"
+                    title="YouTube video player"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowfullscreen>
+            </iframe>
+
+            {% endfor %}
+        </div>
+    </div>
+</main>
+
+</body>
+</html>

@@ -1,0 +1,45 @@
+---
+layout: default
+title: Gallery
+---
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Derek Carsons - {{ page.title }}</title>
+    <link rel="stylesheet" href="{{ '/styles.css' | relative_url }}">
+</head>
+
+<body>
+<header>
+    {% include header.html %}
+</header>
+
+<main>
+    <div class="center-column">
+        <h1>{{ page.title }}</h1>
+
+        <div class="image-gallery">
+            {% for item in site.data.gallery %}
+
+            {% if item.type == "header" %}
+            <h2 class="gallery-header">{{ item.text }}</h2>
+
+            {% elsif item.type == "image" %}
+            <figure>
+                <img src="{{ item.src }}" alt="{{ item.caption }}">
+                {% if item.caption %}
+                <figcaption>{{ item.caption }}</figcaption>
+                {% endif %}
+            </figure>
+            {% endif %}
+
+            {% endfor %}
+        </div>
+    </div>
+</main>
+
+</body>
+</html>
