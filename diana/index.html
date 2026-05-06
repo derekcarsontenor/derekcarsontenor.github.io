@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fetch with Diana</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a0a2e;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    cursor: none;
+  }
+  #ui {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .screen {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10,5,25,0.92);
+    border: 3px solid #f0c040;
+    border-radius: 4px;
+    padding: 40px 60px;
+    pointer-events: all;
+    text-align: center;
+    box-shadow: 0 0 40px #f0c04044, inset 0 0 30px #00000088;
+  }
+  .screen.active { display: flex; }
+  .screen h1 {
+    font-size: 42px;
+    color: #f0c040;
+    text-shadow: 0 0 20px #f0c04088, 2px 2px 0 #a07820;
+    letter-spacing: 4px;
+    margin-bottom: 8px;
+  }
+  .screen .sub {
+    color: #aaa;
+    font-size: 13px;
+    margin-bottom: 30px;
+    letter-spacing: 2px;
+  }
+  .screen p {
+    color: #ccc;
+    font-size: 14px;
+    margin-bottom: 24px;
+    line-height: 1.7;
+    max-width: 320px;
+  }
+  .btn {
+    background: #f0c040;
+    color: #1a0a2e;
+    border: none;
+    padding: 12px 36px;
+    font-size: 18px;
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    letter-spacing: 3px;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+    text-transform: uppercase;
+    margin-top: 6px;
+  }
+  .btn:hover {
+    background: #fff;
+    color: #a07820;
+    box-shadow: 0 0 24px #f0c040aa;
+  }
+  #roundOver .score-big {
+    font-size: 52px;
+    color: #f0c040;
+    text-shadow: 0 0 16px #f0c04088;
+    margin: 10px 0 4px;
+  }
+  #roundOver .label {
+    color: #aaa;
+    font-size: 12px;
+    letter-spacing: 2px;
+    margin-bottom: 18px;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div class="screen active" id="titleScreen">
+    <h1>🐾 FETCH!</h1>
+    <div class="sub">with diana</div>
+    <p>Aim with your mouse. Click to throw the ball.<br>The further you aim, the harder the throw.<br>Collect ⭐ stars as Diana runs!</p>
+    <button class="btn" id="startBtn">START</button>
+  </div>
+  <div class="screen" id="roundOver">
+    <h1>ROUND OVER</h1>
+    <div class="score-big" id="roScore">0</div>
+    <div class="label">STARS COLLECTED</div>
+    <p id="roMsg"></p>
+    <button class="btn" id="nextBtn">NEXT ROUND</button>
+  </div>
+</div>
+<script>
+const SPRITES = {
+  tile:  "https://i.imgur.com/I15JRWE.png",
+  diana: "https://i.imgur.com/sf2uJ72.png",
+  star:  "https://i.imgur.com/hJIBT10.png",
+  ball:  "https://i.imgur.com/lkw7Mxz.png"
+};
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const TILE = 16;
+const COLS = 40;
+const ROWS = 22;
+const W = TILE * COLS;   // 640
+const H = TILE * ROWS;   // 352
+const SCALE = 2;
+const GRAVITY = 0.2;
+const BOUNCE = 0.1;
+const FRICTION = 0.84;
+const MAX_THROW_DIST = 200;
+
+const canvas = document.getElementById('c');
+canvas.width = W;
+canvas.height = H;
+canvas.style.width  = W * SCALE + 'px';
+canvas.style.height = H * SCALE + 'px';
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+// ─── Asset loading ────────────────────────────────────────────────────────────
+const imgs = {};
+let assetsLoaded = 0;
+const assetKeys = Object.keys(SPRITES);
+assetKeys.forEach(k => {
+  const img = new Image();
+  img.src = SPRITES[k];
+  img.onload = () => { assetsLoaded++; };
+  imgs[k] = img;
+});
+
+// ─── State ────────────────────────────────────────────────────────────────────
+let gameState = 'title'; // title | playing | roundOver
+let score = 0;
+let totalScore = 0;
+let throwsLeft = 3;
+let platforms = []; // [{col, row, width}]  (grid cells occupied)
+let solidSet = new Set(); // "col,row"
+let stars = [];
+let ball = null;
+let diana = { x: 100, y: 100, vx: 0, vy: 0, onGround: false, facing: 1, animFrame: 0, animTimer: 0, state: 'idle' };
+let mouseCanvasX = 0, mouseCanvasY = 0; // always in canvas pixels (pre-scale)
+let throwPhase = 'aim'; // aim | flying | chasing | waiting
+let throwTimer = 0;
+let catchFlash = null;
+let particles = [];
+let roundFlash = null;
+let dianaPath = []; // A* path waypoints
+let dianaPathIdx = 0;
+let ballFlash = null; // when ball disappears
+
+// ─── Platform generation ──────────────────────────────────────────────────────
+function generateLevel() {
+  platforms = [];
+  solidSet = new Set();
+
+  // Floor
+  for (let c = 0; c < COLS; c++) {
+    solidSet.add(`${c},${ROWS - 1}`);
+    solidSet.add(`${c},${ROWS - 2}`); // two-tile floor
+  }
+  platforms.push({ col: 0, row: ROWS - 2, width: COLS, isFloor: true });
+
+  // Random platforms on a grid (avoid top-left HUD area: cols 0-6, rows 0-3)
+  const platRows = [4, 6, 8, 10, 12, 14, 16];
+  const attempts = 18;
+  for (let i = 0; i < attempts; i++) {
+    const row = platRows[Math.floor(Math.random() * platRows.length)];
+    const width = 2 + Math.floor(Math.random() * 5);
+    const col = Math.floor(Math.random() * (COLS - width));
+
+    // Skip HUD area
+    if (col < 8 && row < 4) continue;
+
+    // Check no overlap
+    let overlap = false;
+    for (let c = col; c < col + width; c++) {
+      if (solidSet.has(`${c},${row}`)) { overlap = true; break; }
+    }
+    if (overlap) continue;
+
+    for (let c = col; c < col + width; c++) {
+      solidSet.add(`${c},${row}`);
+    }
+    platforms.push({ col, row, width });
+  }
+}
+
+function isSolid(col, row) {
+  return solidSet.has(`${col},${row}`);
+}
+function isSolidPx(px, py) {
+  return isSolid(Math.floor(px / TILE), Math.floor(py / TILE));
+}
+
+// ─── Star placement ───────────────────────────────────────────────────────────
+function generateStars() {
+  stars = [];
+  const tryPlace = () => {
+    for (let tries = 0; tries < 60; tries++) {
+      const c = Math.floor(Math.random() * COLS);
+      const r = Math.floor(Math.random() * (ROWS - 4)) + 1;
+      // Must have solid below (on platform or floor), and space above
+      if (isSolid(c, r) || isSolid(c, r - 1)) continue;
+
+      // Find if there's a solid below within 3 tiles
+      let onSurface = false;
+      for (let dr = 1; dr <= 3; dr++) {
+        if (isSolid(c, r + dr)) { onSurface = true; break; }
+      }
+      if (!onSurface) continue;
+
+      // No other star too close
+      const px = c * TILE + TILE / 2;
+      const py = r * TILE + TILE / 2;
+      let tooClose = stars.some(s => Math.abs(s.x - px) < TILE * 1.5 && Math.abs(s.y - py) < TILE * 1.5);
+      if (tooClose) continue;
+
+      stars.push({ x: px, y: py, collected: false, phase: Math.random() * Math.PI * 2 });
+      return true;
+    }
+    return false;
+  };
+  const count = 8 + Math.floor(Math.random() * 7);
+  for (let i = 0; i < count; i++) tryPlace();
+}
+
+// ─── Diana placement ──────────────────────────────────────────────────────────
+function placeDiana() {
+  const plats = platforms.filter(p => !p.isFloor);
+  const p = plats.length ? plats[Math.floor(Math.random() * plats.length)] : platforms[0];
+  diana.x = (p.col + Math.floor(p.width / 2)) * TILE + TILE / 2;
+  diana.y = p.row * TILE - TILE;
+  diana.vx = 0; diana.vy = 0;
+  diana.onGround = true;
+  diana.state = 'idle';
+  diana.facing = 1;
+}
+
+// ─── A* Pathfinding ──────────────────────────────────────────────────────────
+function buildNavGraph() {
+  // Build reachable positions: (col, row) where there's ground below
+  const nodes = [];
+  const nodeMap = {};
+  for (let c = 0; c < COLS; c++) {
+    for (let r = 1; r < ROWS - 1; r++) {
+      if (isSolid(c, r) && !isSolid(c, r - 1)) {
+        const key = `${c},${r}`;
+        nodes.push({ c, r, key });
+        nodeMap[key] = { c, r };
+      }
+    }
+  }
+  return { nodes, nodeMap };
+}
+
+function astar(startC, startR, goalC, goalR) {
+  // Snap to surface
+  const findSurface = (c, r) => {
+    c = Math.max(0, Math.min(COLS - 1, c));
+    for (let dr = 0; dr <= ROWS; dr++) {
+      if (r + dr < ROWS && isSolid(c, r + dr) && !isSolid(c, r + dr - 1)) return r + dr;
+    }
+    return ROWS - 1;
+  };
+  startR = findSurface(startC, startR);
+  goalR = findSurface(goalC, goalR);
+
+  const key = (c, r) => `${c},${r}`;
+  const heur = (c, r) => Math.abs(c - goalC) + Math.abs(r - goalR) * 2;
+
+  const open = [{ c: startC, r: startR, g: 0, f: heur(startC, startR), parent: null }];
+  const closed = new Set();
+  const best = {};
+  best[key(startC, startR)] = 0;
+
+  while (open.length) {
+    open.sort((a, b) => a.f - b.f);
+    const cur = open.shift();
+    const ck = key(cur.c, cur.r);
+    if (closed.has(ck)) continue;
+    closed.add(ck);
+
+    if (cur.c === goalC && cur.r === goalR) {
+      // Reconstruct
+      const path = [];
+      let n = cur;
+      while (n) { path.unshift({ c: n.c, r: n.r }); n = n.parent; }
+      return path;
+    }
+
+    // Neighbors: walk left/right on same platform, or jump to adjacent platforms
+    const neighbors = [];
+    // Walk
+    for (const dc of [-1, 1]) {
+      const nc = cur.c + dc;
+      if (nc < 0 || nc >= COLS) continue;
+      if (isSolid(nc, cur.r) && !isSolid(nc, cur.r - 1)) {
+        neighbors.push({ c: nc, r: cur.r, cost: 1 });
+      }
+      // Step down
+      if (!isSolid(nc, cur.r)) {
+        let nr = cur.r;
+        while (nr < ROWS - 1 && !isSolid(nc, nr)) nr++;
+        if (nr < ROWS && !isSolid(nc, nr - 1)) {
+          neighbors.push({ c: nc, r: nr, cost: 1 + Math.abs(nr - cur.r) * 0.3 });
+        }
+      }
+    }
+    // Jump up to platforms within range
+    for (let dc = -5; dc <= 5; dc++) {
+      for (let dr = 1; dr <= 6; dr++) {
+        const nc = cur.c + dc, nr = cur.r - dr;
+        if (nc < 0 || nc >= COLS || nr < 1) continue;
+        if (isSolid(nc, nr) && !isSolid(nc, nr - 1)) {
+          neighbors.push({ c: nc, r: nr, cost: 2 + Math.abs(dc) * 0.4 + dr * 0.5 });
+        }
+      }
+    }
+
+    for (const nb of neighbors) {
+      const nk = key(nb.c, nb.r);
+      if (closed.has(nk)) continue;
+      const ng = cur.g + nb.cost;
+      if (best[nk] !== undefined && best[nk] <= ng) continue;
+      best[nk] = ng;
+      open.push({ c: nb.c, r: nb.r, g: ng, f: ng + heur(nb.c, nb.r), parent: cur });
+    }
+  }
+  return null; // no path
+}
+
+// ─── Ball physics ─────────────────────────────────────────────────────────────
+function throwBall(ox, oy, tx, ty) {
+  const dx = tx - ox, dy = ty - oy;
+  const dist = Math.min(Math.sqrt(dx * dx + dy * dy), MAX_THROW_DIST);
+  const power = dist / MAX_THROW_DIST;
+  const angle = Math.atan2(dy, dx);
+  const speed = 4 + power * 5;
+  ball = {
+    x: ox, y: oy,
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    r: 5, alive: true,
+    trail: []
+  };
+  spawnParticles(ox, oy, '#f0c040', 8);
+}
+
+function updateBall() {
+  if (!ball || !ball.alive) return;
+
+  // Stop micro-jitter: if speed is tiny, kill velocity
+  const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+  if (speed < 0.15) {
+    ball.vx = 0;
+    ball.vy = 0;
+    return;
+  }
+
+  ball.trail.push({ x: ball.x, y: ball.y });
+  if (ball.trail.length > 12) ball.trail.shift();
+
+  ball.vy += GRAVITY;
+  ball.x += ball.vx;
+  ball.y += ball.vy;
+
+  // Wall bounce - clamp and reflect
+  if (ball.x - ball.r < 0) {
+    ball.x = ball.r;
+    ball.vx = Math.abs(ball.vx) * BOUNCE;
+    spawnParticles(ball.x, ball.y, '#fff', 3);
+  }
+  if (ball.x + ball.r > W) {
+    ball.x = W - ball.r;
+    ball.vx = -Math.abs(ball.vx) * BOUNCE;
+    spawnParticles(ball.x, ball.y, '#fff', 3);
+  }
+  if (ball.y - ball.r < 0) {
+    ball.y = ball.r;
+    ball.vy = Math.abs(ball.vy) * BOUNCE;
+  }
+
+  // Floor bounce
+  const floorY = (ROWS - 2) * TILE - ball.r;
+  if (ball.y >= floorY) {
+    ball.y = floorY;
+    ball.vy = -Math.abs(ball.vy) * BOUNCE;
+    ball.vx *= FRICTION;
+    if (Math.abs(ball.vy) > 0.5) spawnParticles(ball.x, ball.y, '#ccc', 3);
+  }
+
+  // Platform collision (top surface only)
+  const bc = Math.floor(ball.x / TILE);
+  // Check the tile the ball's bottom edge is entering
+  const bottomTileRow = Math.floor((ball.y + ball.r) / TILE);
+  const topTileRow    = Math.floor((ball.y - ball.r) / TILE);
+  if (isSolid(bc, bottomTileRow) && !isSolid(bc, topTileRow)) {
+    // Ball landed on top of a platform
+    ball.y = bottomTileRow * TILE - ball.r;
+    ball.vy = -Math.abs(ball.vy) * BOUNCE;
+    ball.vx *= FRICTION;
+    if (Math.abs(ball.vy) > 0.5) spawnParticles(ball.x, ball.y, '#ccc', 3);
+  }
+}
+
+// ─── Diana AI ────────────────────────────────────────────────────────────────
+function startChase() {
+  if (!ball) return;
+  diana.state = 'chasing';
+  computeDianaPath();
+}
+
+function computeDianaPath() {
+  if (!ball) return;
+  const sc = Math.floor(diana.x / TILE);
+  const sr = Math.floor(diana.y / TILE) + 1;
+  const gc = Math.floor(ball.x / TILE);
+  const gr = Math.floor(ball.y / TILE) + 1;
+  const path = astar(sc, sr, gc, gr);
+  dianaPath = path ? path : [];
+  dianaPathIdx = 0;
+}
+
+function updateDiana(dt) {
+  // Gravity
+  diana.vy += GRAVITY;
+
+  // Move toward path
+  if (diana.state === 'chasing' && dianaPath.length > 0) {
+    const target = dianaPath[dianaPathIdx];
+    if (target) {
+      const tx = target.c * TILE + TILE / 2;
+      const ty = (target.r - 1) * TILE + TILE / 2; // stand on top of solid row
+
+      const dx = tx - diana.x;
+      const dist = Math.abs(dx);
+
+      if (dist < 6) {
+        dianaPathIdx++;
+        if (dianaPathIdx >= dianaPath.length) {
+          dianaPath = [];
+          diana.vx *= 0.5;
+        }
+      } else {
+        const speed = 2.2;
+        diana.vx = (dx > 0 ? 1 : -1) * speed;
+        diana.facing = dx > 0 ? 1 : -1;
+
+        // Jump if target is above
+        if (ty < diana.y - TILE * 1.5 && diana.onGround) {
+          const jumpHeight = diana.y - ty;
+          diana.vy = -Math.sqrt(2 * GRAVITY * (jumpHeight + TILE * 1.5));
+          diana.onGround = false;
+        }
+      }
+    }
+  } else if (diana.state === 'idle') {
+    diana.vx *= 0.8;
+  }
+
+  diana.x += diana.vx;
+  diana.y += diana.vy;
+
+  // Clamp to screen
+  diana.x = Math.max(TILE, Math.min(W - TILE, diana.x));
+
+  // Ground / platform collision
+  diana.onGround = false;
+  const dc = Math.floor(diana.x / TILE);
+  const dr = Math.floor(diana.y / TILE);
+
+  if (isSolid(dc, dr)) {
+    diana.y = dr * TILE;
+    diana.vy = 0;
+    diana.onGround = true;
+  }
+  // Prevent going below floor
+  if (diana.y > H - TILE * 2) {
+    diana.y = H - TILE * 2;
+    diana.vy = 0;
+    diana.onGround = true;
+  }
+  if (diana.y < 0) { diana.y = 0; diana.vy = 0; }
+
+  // Animation
+  diana.animTimer++;
+  if (Math.abs(diana.vx) > 0.5) {
+    if (diana.animTimer % 10 === 0) diana.animFrame = (diana.animFrame + 1) % 4;
+  } else {
+    diana.animFrame = 0;
+  }
+
+  // Star collection — diana.y is feet; her center is ~1 tile above feet
+  const dCenterX = diana.x;
+  const dCenterY = diana.y - TILE; // vertical center of diana sprite
+  stars.forEach(s => {
+    if (s.collected) return;
+    // Compare against the star's fixed grid position (not the bobbing visual offset)
+    const dx = dCenterX - s.x, dy = dCenterY - s.y;
+    if (Math.sqrt(dx*dx + dy*dy) < TILE * 2.0) {
+      s.collected = true;
+      score++;
+      spawnParticles(s.x, s.y, '#ffe566', 12);
+    }
+  });
+
+  // Ball catch detection
+  if (ball && ball.alive && diana.state === 'chasing') {
+    const dx = diana.x - ball.x, dy = diana.y - ball.y;
+    if (Math.sqrt(dx*dx + dy*dy) < TILE * 2) {
+      // Catch!
+      ball.alive = false;
+      catchFlash = { x: diana.x, y: diana.y - TILE * 2, alpha: 1, timer: 0 };
+      spawnParticles(diana.x, diana.y, '#f0c040', 20);
+      diana.state = 'idle';
+      throwPhase = 'waiting';
+      throwTimer = 0;
+    }
+  }
+}
+
+// ─── Particles ────────────────────────────────────────────────────────────────
+function spawnParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1 + Math.random() * 3;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 1,
+      color,
+      life: 1,
+      size: 2 + Math.random() * 3
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.1;
+    p.life -= 0.03;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+// ─── Trajectory preview ───────────────────────────────────────────────────────
+function getTrajectory(ox, oy, tx, ty) {
+  const dx = tx - ox, dy = ty - oy;
+  const dist = Math.min(Math.sqrt(dx * dx + dy * dy), MAX_THROW_DIST);
+  const power = dist / MAX_THROW_DIST;
+  const angle = Math.atan2(dy, dx);
+  const speed = 4 + power * 5;
+  let sx = ox, sy = oy;
+  let svx = Math.cos(angle) * speed;
+  let svy = Math.sin(angle) * speed;
+  const points = [];
+  const ballR = 5;
+  const floorY = (ROWS - 2) * TILE - ballR;
+
+  for (let i = 0; i < 80; i++) {
+    // Mirror updateBall exactly
+    const spd = Math.sqrt(svx * svx + svy * svy);
+    if (spd < 0.15) break;
+
+    svy += GRAVITY;
+    sx += svx; sy += svy;
+
+    if (sx - ballR < 0)  { sx = ballR;     svx =  Math.abs(svx) * BOUNCE; }
+    if (sx + ballR > W)  { sx = W - ballR; svx = -Math.abs(svx) * BOUNCE; }
+    if (sy - ballR < 0)  { sy = ballR;     svy =  Math.abs(svy) * BOUNCE; }
+    if (sy >= floorY)    { sy = floorY;    svy = -Math.abs(svy) * BOUNCE; svx *= FRICTION; }
+
+    const bc = Math.floor(sx / TILE);
+    const bBot = Math.floor((sy + ballR) / TILE);
+    const bTop = Math.floor((sy - ballR) / TILE);
+    if (isSolid(bc, bBot) && !isSolid(bc, bTop)) {
+      sy = bBot * TILE - ballR;
+      svy = -Math.abs(svy) * BOUNCE;
+      svx *= FRICTION;
+    }
+
+    if (i % 3 === 0) points.push({ x: sx, y: sy });
+  }
+  return points;
+}
+
+// ─── Drawing ──────────────────────────────────────────────────────────────────
+function drawBg() {
+  // Sky gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0d0520');
+  grad.addColorStop(1, '#1a2a4a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Stars in sky (decorative)
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  for (let i = 0; i < 60; i++) {
+    const sx = (i * 137.5 + 20) % W;
+    const sy = (i * 89.3 + 10) % (H * 0.6);
+    const twinkle = 0.3 + 0.7 * Math.abs(Math.sin(Date.now() * 0.001 + i));
+    ctx.globalAlpha = twinkle * 0.5;
+    ctx.fillRect(sx, sy, 1, 1);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawPlatforms() {
+  if (!imgs.tile.complete) return;
+  platforms.forEach(p => {
+    for (let i = 0; i < p.width; i++) {
+      ctx.drawImage(imgs.tile, (p.col + i) * TILE, p.row * TILE, TILE, TILE);
+    }
+  });
+}
+
+function drawStars(now) {
+  if (!imgs.star.complete) return;
+  stars.forEach(s => {
+    if (s.collected) return;
+    const bob = Math.sin(now * 0.002 + s.phase) * 3;
+    const glow = 0.5 + 0.5 * Math.abs(Math.sin(now * 0.003 + s.phase));
+
+    // Glow
+    ctx.save();
+    ctx.globalAlpha = 0.35 * glow;
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = '#ffe566';
+    ctx.fillStyle = '#ffe566';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y + bob, TILE * 0.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.drawImage(imgs.star, s.x - TILE / 2, s.y + bob - TILE / 2, TILE, TILE);
+  });
+}
+
+function drawDiana() {
+  if (!imgs.diana.complete) return;
+  const w = TILE * 2, h = TILE * 2;
+  ctx.save();
+  if (diana.facing < 0) {
+    ctx.scale(-1, 1);
+    ctx.drawImage(imgs.diana, -diana.x - w / 2, diana.y - h, w, h);
+  } else {
+    ctx.drawImage(imgs.diana, diana.x - w / 2, diana.y - h, w, h);
+  }
+  ctx.restore();
+}
+
+function drawBall(now) {
+  if (!ball || !ball.alive) return;
+  if (!imgs.ball.complete) return;
+
+  // Trail
+  ball.trail.forEach((t, i) => {
+    ctx.globalAlpha = (i / ball.trail.length) * 0.4;
+    ctx.fillStyle = '#ffe09a';
+    const s = 4 * (i / ball.trail.length);
+    ctx.fillRect(t.x - s / 2, t.y - s / 2, s, s);
+  });
+  ctx.globalAlpha = 1;
+
+  const bs = TILE * 1.2;
+  // Shadow
+  ctx.globalAlpha = 0.2;
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.ellipse(ball.x, ball.y + 3, bs / 2, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  ctx.drawImage(imgs.ball, ball.x - bs / 2, ball.y - bs / 2, bs, bs);
+}
+
+function drawTrajectory(now) {
+  if (throwPhase !== 'aim' || gameState !== 'playing') return;
+  const cx = mouseCanvasX;
+  const cy = mouseCanvasY;
+  const throwOriginY = diana.y - TILE;
+  const pts = getTrajectory(diana.x, throwOriginY, cx, cy);
+
+  pts.forEach((p, i) => {
+    const alpha = 1 - i / pts.length;
+    ctx.globalAlpha = alpha * 0.85;
+    ctx.fillStyle = '#f0c040';
+    const s = 3;
+    ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
+  });
+  ctx.globalAlpha = 1;
+
+  // Reticle at mouse position
+  const dx = cx - diana.x, dy = cy - throwOriginY;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  const power = Math.min(dist / MAX_THROW_DIST, 1);
+  const t = now * 0.005;
+  ctx.save();
+  ctx.strokeStyle = `hsl(${60 - power * 60}, 100%, 65%)`;
+  ctx.lineWidth = 1.5;
+  ctx.globalAlpha = 0.85;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 6 + Math.sin(t * 4) * 1.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - 10, cy); ctx.lineTo(cx + 10, cy);
+  ctx.moveTo(cx, cy - 10); ctx.lineTo(cx, cy + 10);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawCatchFlash(now) {
+  if (!catchFlash) return;
+  catchFlash.timer++;
+  catchFlash.alpha = Math.max(0, 1 - catchFlash.timer / 90);
+  if (catchFlash.alpha <= 0) { catchFlash = null; return; }
+  const pulse = 1 + 0.1 * Math.sin(catchFlash.timer * 0.4);
+  ctx.save();
+  ctx.globalAlpha = catchFlash.alpha;
+  ctx.font = `bold ${Math.floor(14 * pulse)}px 'Courier New'`;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#f0c040';
+  ctx.shadowBlur = 10;
+  ctx.shadowColor = '#f0c040';
+  ctx.fillText('CATCH! ⭐', catchFlash.x, catchFlash.y - catchFlash.timer * 0.3);
+  ctx.restore();
+}
+
+function drawBallFlash(now) {
+  if (!ballFlash) return;
+  ballFlash.timer++;
+  if (ballFlash.timer > 40) { ballFlash = null; ball = null; return; }
+  const vis = ballFlash.timer % 8 < 4;
+  if (vis && ball) {
+    ctx.globalAlpha = 0.6;
+    const bs = TILE * 1.2;
+    ctx.drawImage(imgs.ball, ball.x - bs/2, ball.y - bs/2, bs, bs);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawHUD() {
+  // Score
+  ctx.save();
+  ctx.font = 'bold 14px "Courier New"';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#fff';
+  ctx.shadowBlur = 6;
+  ctx.shadowColor = '#000';
+  ctx.fillText(`⭐ ${score}`, 10, 20);
+
+  // Throw pips
+  ctx.textAlign = 'right';
+  ctx.fillText('THROWS:', W - 70, 20);
+  for (let i = 0; i < 3; i++) {
+    ctx.fillStyle = i < throwsLeft ? '#f0c040' : '#444';
+    ctx.fillRect(W - 60 + i * 18, 8, 12, 12);
+  }
+
+  // Phase hint
+  if (throwPhase === 'aim' && throwsLeft > 0) {
+    ctx.textAlign = 'center';
+    ctx.font = '10px "Courier New"';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillText('AIM & CLICK TO THROW', W / 2, H - 8);
+  } else if (throwPhase === 'flying') {
+    ctx.textAlign = 'center';
+    ctx.font = '10px "Courier New"';
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillText('DIANA WILL CHASE SOON...', W / 2, H - 8);
+  } else if (throwPhase === 'waiting') {
+    ctx.textAlign = 'center';
+    ctx.font = '10px "Courier New"';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillText(throwsLeft > 0 ? 'CLICK TO THROW AGAIN' : '...', W / 2, H - 8);
+  }
+  ctx.restore();
+}
+
+// ─── Main loop ────────────────────────────────────────────────────────────────
+let lastTime = 0;
+function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = now - lastTime;
+  lastTime = now;
+
+  ctx.clearRect(0, 0, W, H);
+  drawBg();
+
+  if (gameState !== 'playing') {
+    drawPlatforms();
+    return;
+  }
+
+  drawPlatforms();
+  drawStars(now);
+
+  // Phase logic
+  if (throwPhase === 'flying') {
+    throwTimer += dt;
+    updateBall();
+    if (throwTimer > 3000) {
+      throwPhase = 'chasing';
+      startChase();
+    }
+  } else if (throwPhase === 'chasing') {
+    throwTimer += dt;
+    updateBall();
+    if (throwTimer > 13000) {
+      // Time out
+      if (ball && ball.alive) {
+        ballFlash = { timer: 0 };
+        ball.alive = false;
+      }
+      diana.state = 'idle';
+      throwPhase = 'waiting';
+      throwTimer = 0;
+    }
+    // Recompute path periodically
+    if (Math.floor(throwTimer / 500) !== Math.floor((throwTimer - dt) / 500)) {
+      computeDianaPath();
+    }
+  } else if (throwPhase === 'waiting') {
+    throwTimer += dt;
+    if (throwTimer > 2000 && throwsLeft > 0) {
+      throwPhase = 'aim';
+    }
+    if (throwsLeft <= 0 && throwTimer > 1500) {
+      endRound();
+    }
+  }
+
+  updateDiana(dt / 16);
+  updateParticles();
+  drawBallFlash(now);
+  drawBall(now);
+  drawDiana();
+  drawTrajectory(now);
+  drawParticles();
+  drawCatchFlash(now);
+  drawHUD();
+}
+
+function endRound() {
+  gameState = 'roundOver';
+  totalScore += score;
+  document.getElementById('roScore').textContent = score;
+  const msgs = [
+    `Diana caught some great throws!`,
+    `What a good girl! Total: ${totalScore} ⭐`,
+    `Stars collected: ${score}. Keep going!`
+  ];
+  document.getElementById('roMsg').textContent = msgs[Math.floor(Math.random() * msgs.length)];
+  document.getElementById('roundOver').classList.add('active');
+}
+
+// ─── New round ────────────────────────────────────────────────────────────────
+function newRound() {
+  score = 0;
+  throwsLeft = 3;
+  throwPhase = 'aim';
+  throwTimer = 0;
+  ball = null;
+  ballFlash = null;
+  catchFlash = null;
+  particles = [];
+  dianaPath = [];
+  generateLevel();
+  generateStars();
+  placeDiana();
+  gameState = 'playing';
+}
+
+// ─── Events ───────────────────────────────────────────────────────────────────
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  mouseCanvasX = (e.clientX - rect.left) / SCALE;
+  mouseCanvasY = (e.clientY - rect.top) / SCALE;
+});
+
+canvas.addEventListener('click', e => {
+  if (gameState !== 'playing') return;
+  if (throwPhase !== 'aim' || throwsLeft <= 0) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const cx = (e.clientX - rect.left) / SCALE;
+  const cy = (e.clientY - rect.top) / SCALE;
+
+  throwBall(diana.x, diana.y - TILE, cx, cy);
+  throwsLeft--;
+  throwPhase = 'flying';
+  throwTimer = 0;
+  diana.state = 'idle';
+});
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('titleScreen').classList.remove('active');
+  totalScore = 0;
+  newRound();
+});
+
+document.getElementById('nextBtn').addEventListener('click', () => {
+  document.getElementById('roundOver').classList.remove('active');
+  newRound();
+});
+
+// ─── Start ────────────────────────────────────────────────────────────────────
+generateLevel();
+generateStars();
+placeDiana();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
